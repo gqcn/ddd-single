@@ -6,6 +6,7 @@ import (
 	"main/internal/domain/product/entity"
 	"main/internal/domain/product/repository"
 	"main/internal/domain/product/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 	"main/utility/mongodb"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -143,7 +144,7 @@ func (imp *impProductRepository) toEntity(po *ProductPO) *entity.Product {
 		po.Id,
 		po.Name,
 		po.Description,
-		valueobject.NewMoney(po.Price.Amount, po.Price.Currency),
+		sharedvo.NewMoney(po.Price.Amount, po.Price.Currency),
 		po.Stock,
 		valueobject.ProductStatus(po.Status),
 		po.CreatedAt,

@@ -1,20 +1,24 @@
 package valueobject
 
-import "time"
+import (
+	"time"
+
+	sharedvo "main/internal/domain/shared/valueobject"
+)
 
 // PaymentInfo 支付信息值对象
 type PaymentInfo struct {
-	Amount    *Money    // 支付金额
-	Method    string    // 支付方式
-	Channel   string    // 支付渠道
-	TradeNo   string    // 交易号
-	PaidAt    time.Time // 支付时间
+	Amount    *sharedvo.Money        // 支付金额
+	Method    string                 // 支付方式
+	Channel   string                 // 支付渠道
+	TradeNo   string                 // 交易号
+	PaidAt    time.Time              // 支付时间
 	ExtraData map[string]interface{} // 额外数据
 }
 
 // NewPaymentInfo 创建支付信息值对象
 func NewPaymentInfo(
-	amount *Money,
+	amount *sharedvo.Money,
 	method string,
 	channel string,
 	tradeNo string,

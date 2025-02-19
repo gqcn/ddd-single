@@ -4,9 +4,9 @@ import (
 	"time"
 
 	"main/internal/domain/order/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/util/guid"
 )
 
 // Order represents the order aggregate root
@@ -14,7 +14,7 @@ type Order struct {
 	Id          string
 	UserId      string
 	Items       []*OrderItem
-	TotalAmount *valueobject.Money
+	TotalAmount *sharedvo.Money
 	Status      valueobject.OrderStatus
 	Remark      string
 	CreatedAt   int64
@@ -24,11 +24,11 @@ type Order struct {
 // NewOrder creates a new order instance
 func NewOrder(userId string) *Order {
 	return &Order{
-		Id:          guid.S(),
+		Id:          "", // ID will be assigned by the infrastructure layer
 		UserId:      userId,
 		Status:      valueobject.OrderStatusCreated,
 		Items:       make([]*OrderItem, 0),
-		TotalAmount: valueobject.NewMoney(0, "CNY"),
+		TotalAmount: sharedvo.NewMoney(0, "CNY"),
 		CreatedAt:   time.Now().UnixMilli(),
 		UpdatedAt:   time.Now().UnixMilli(),
 	}
@@ -91,7 +91,7 @@ func (o *Order) UpdateStatus(newStatus valueobject.OrderStatus) error {
 
 // recalculateTotal recalculates the total amount of the order
 func (o *Order) recalculateTotal() {
-	total := valueobject.NewMoney(0, "CNY")
+	total := sharedvo.NewMoney(0, "CNY")
 	for _, item := range o.Items {
 		itemTotal := item.Price.Multiply(float64(item.Quantity))
 		newTotal, _ := total.Add(itemTotal)

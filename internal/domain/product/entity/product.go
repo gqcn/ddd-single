@@ -2,6 +2,7 @@ package entity
 
 import (
 	"main/internal/domain/product/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 )
 
 // Product 商品实体
@@ -9,7 +10,7 @@ type Product struct {
 	Id          string
 	Name        string
 	Description string
-	Price       *valueobject.Money
+	Price       *sharedvo.Money
 	Stock       int
 	Status      valueobject.ProductStatus
 	CreatedAt   int64
@@ -21,7 +22,7 @@ func NewProduct(
 	id string,
 	name string,
 	description string,
-	price *valueobject.Money,
+	price *sharedvo.Money,
 	stock int,
 	status valueobject.ProductStatus,
 	createdAt int64,
@@ -49,7 +50,7 @@ func (p *Product) UpdateStock(stock int) error {
 }
 
 // UpdatePrice 更新价格
-func (p *Product) UpdatePrice(price *valueobject.Money) error {
+func (p *Product) UpdatePrice(price *sharedvo.Money) error {
 	if price == nil {
 		return valueobject.ErrInvalidPrice
 	}

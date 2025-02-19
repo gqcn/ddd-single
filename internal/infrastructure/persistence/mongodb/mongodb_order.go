@@ -5,12 +5,14 @@ import (
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"main/internal/domain/order/entity"
 	"main/internal/domain/order/repository"
 	"main/internal/domain/order/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 	"main/utility/mongodb"
 )
 
@@ -28,9 +30,11 @@ type OrderPO struct {
 
 // OrderItemPO 订单项持久化对象
 type OrderItemPO struct {
-	ProductId string  `bson:"product_id"`
-	Quantity  int     `bson:"quantity"`
-	Price     MoneyPO `bson:"price"`
+	Id          string  `bson:"_id"`
+	ProductId   string  `bson:"product_id"`
+	Quantity    int     `bson:"quantity"`
+	Price       MoneyPO `bson:"price"`
+	ProductName string  `bson:"product_name"`
 }
 
 // MoneyPO Money值对象的持久化对象
@@ -61,6 +65,13 @@ func NewOrderRepository(ctx context.Context, cfg mongodb.Config) (repository.Ord
 // Save 保存订单
 func (imp *impOrderRepository) Save(ctx context.Context, order *entity.Order) error {
 	po := imp.toOrderPO(order)
+
+	// 如果是新订单（ID为空），生成新的ID
+	if po.Id == "" {
+		po.Id = primitive.NewObjectID().Hex()
+		order.Id = po.Id // 更新领域实体的ID
+	}
+
 	opts := options.Update().SetUpsert(true)
 	_, err := imp.orderCollection.UpdateOne(
 		ctx,
@@ -110,9 +121,18 @@ func (imp *impOrderRepository) FindByUserId(ctx context.Context, userId string) 
 func (imp *impOrderRepository) toOrderPO(order *entity.Order) *OrderPO {
 	items := make([]OrderItemPO, len(order.Items))
 	for i, item := range order.Items {
+		// 如果订单项没有ID，生成新的ID
+		itemId := item.Id
+		if itemId == "" {
+			itemId = primitive.NewObjectID().Hex()
+			item.Id = itemId // 更新领域实体的ID
+		}
+
 		items[i] = OrderItemPO{
-			ProductId: item.ProductId,
-			Quantity:  item.Quantity,
+			Id:          itemId,
+			ProductId:   item.ProductId,
+			ProductName: item.ProductName,
+			Quantity:    item.Quantity,
 			Price: MoneyPO{
 				Amount:   item.Price.Amount(),
 				Currency: item.Price.Currency(),
@@ -140,9 +160,11 @@ func (imp *impOrderRepository) toEntity(po *OrderPO) *entity.Order {
 	items := make([]*entity.OrderItem, len(po.Items))
 	for i, item := range po.Items {
 		items[i] = &entity.OrderItem{
-			ProductId: item.ProductId,
-			Quantity:  item.Quantity,
-			Price:     valueobject.NewMoney(item.Price.Amount, item.Price.Currency),
+			Id:          item.Id,
+			ProductId:   item.ProductId,
+			ProductName: item.ProductName,
+			Quantity:    item.Quantity,
+			Price:       sharedvo.NewMoney(item.Price.Amount, item.Price.Currency),
 		}
 	}
 
@@ -150,7 +172,7 @@ func (imp *impOrderRepository) toEntity(po *OrderPO) *entity.Order {
 		Id:          po.Id,
 		UserId:      po.UserId,
 		Items:       items,
-		TotalAmount: valueobject.NewMoney(po.TotalAmount.Amount, po.TotalAmount.Currency),
+		TotalAmount: sharedvo.NewMoney(po.TotalAmount.Amount, po.TotalAmount.Currency),
 		Status:      valueobject.OrderStatus(po.Status),
 		Remark:      po.Remark,
 		CreatedAt:   po.CreatedAt,

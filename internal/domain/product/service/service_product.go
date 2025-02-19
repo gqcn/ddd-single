@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 
+	"main/internal/domain/product/valueobject"
+
 	"github.com/gogf/gf/v2/errors/gerror"
 
 	"main/internal/domain/product/entity"
 	"main/internal/domain/product/repository"
-	"main/internal/domain/product/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 )
 
 // ProductService 商品服务
@@ -28,7 +30,7 @@ func (s *ProductService) CreateProduct(
 	id string,
 	name string,
 	description string,
-	price *valueobject.Money,
+	price *sharedvo.Money,
 	stock int,
 ) (*entity.Product, error) {
 	// 检查商品是否已存在
@@ -53,12 +55,12 @@ func (s *ProductService) CreateProduct(
 	)
 
 	// 验证商品
-	if err := product.Validate(); err != nil {
+	if err = product.Validate(); err != nil {
 		return nil, err
 	}
 
 	// 保存商品
-	if err := s.productRepo.Save(ctx, product); err != nil {
+	if err = s.productRepo.Save(ctx, product); err != nil {
 		return nil, err
 	}
 
@@ -71,7 +73,7 @@ func (s *ProductService) UpdateProduct(
 	id string,
 	name string,
 	description string,
-	price *valueobject.Money,
+	price *sharedvo.Money,
 	stock int,
 	status valueobject.ProductStatus,
 ) (*entity.Product, error) {

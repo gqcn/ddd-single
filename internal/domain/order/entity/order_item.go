@@ -1,10 +1,9 @@
 package entity
 
 import (
-	"main/internal/domain/order/valueobject"
+	"main/internal/domain/shared/valueobject"
 
 	"github.com/gogf/gf/v2/errors/gerror"
-	"github.com/gogf/gf/v2/util/gutil"
 )
 
 // OrderItem represents an item in an order
@@ -20,7 +19,7 @@ type OrderItem struct {
 // NewOrderItem creates a new order item
 func NewOrderItem(productId string, productName string, quantity int, price float64) *OrderItem {
 	return &OrderItem{
-		Id:          gutil.UUId(),
+		Id:          "", // ID will be assigned by the infrastructure layer
 		ProductId:   productId,
 		ProductName: productName,
 		Quantity:    quantity,
