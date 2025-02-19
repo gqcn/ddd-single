@@ -1,50 +1,47 @@
 package entity
 
 import (
-	"main/internal/domain/shared/valueobject"
+	sharedvo "main/internal/domain/shared/valueobject"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 )
 
 // OrderItem represents an item in an order
 type OrderItem struct {
-	Id          string
-	OrderId     string
-	ProductId   string
-	ProductName string
-	Quantity    int
-	Price       *valueobject.Money
+	ProductId   string          // 商品ID
+	ProductName string          // 商品名称
+	Quantity    int             // 数量
+	Price       *sharedvo.Money // 单价
 }
 
 // NewOrderItem creates a new order item
 func NewOrderItem(productId string, productName string, quantity int, price float64) *OrderItem {
 	return &OrderItem{
-		Id:          "", // ID will be assigned by the infrastructure layer
 		ProductId:   productId,
 		ProductName: productName,
 		Quantity:    quantity,
-		Price:       valueobject.NewMoney(price, "CNY"),
+		Price:       sharedvo.NewMoney(price, "CNY"),
 	}
 }
 
-// UpdateQuantity updates the quantity of the order item
+// GetSubtotal calculates the subtotal for this item
+func (i *OrderItem) GetSubtotal() *sharedvo.Money {
+	return i.Price.Multiply(float64(i.Quantity))
+}
+
+// UpdateQuantity updates the quantity of the item
 func (i *OrderItem) UpdateQuantity(quantity int) error {
 	if quantity <= 0 {
-		return gerror.New("quantity must be greater than 0")
+		return gerror.New("quantity must be positive")
 	}
 	i.Quantity = quantity
 	return nil
 }
 
-// SubTotal calculates the subtotal for this item
-func (i *OrderItem) SubTotal() *valueobject.Money {
-	return i.Price.Multiply(float64(i.Quantity))
-}
-
 // Validate validates the order item
 func (i *OrderItem) Validate() error {
 	if i.ProductId == "" {
-		return gerror.New("product Id is required")
+		return gerror.New("product id is required")
 	}
 
 	if i.ProductName == "" {
@@ -52,11 +49,15 @@ func (i *OrderItem) Validate() error {
 	}
 
 	if i.Quantity <= 0 {
-		return gerror.New("quantity must be greater than 0")
+		return gerror.New("quantity must be positive")
 	}
 
-	if i.Price == nil || i.Price.Amount() <= 0 {
-		return gerror.New("price must be greater than 0")
+	if i.Price == nil {
+		return gerror.New("price is required")
+	}
+
+	if i.Price.Amount() <= 0 {
+		return gerror.New("price must be positive")
 	}
 
 	return nil

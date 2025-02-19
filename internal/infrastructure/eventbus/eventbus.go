@@ -1,46 +1,44 @@
 package eventbus
 
-import (
-	"context"
-	"sync"
-)
-
-// EventHandler 事件处理器
-type EventHandler func(ctx context.Context, event Event) error
+import "context"
 
 // EventBus 事件总线接口
 type EventBus interface {
 	// Publish 发布事件
-	Publish(ctx context.Context, event Event) error
+	Publish(ctx context.Context, event interface{}) error
 	// Subscribe 订阅事件
-	Subscribe(eventName string, handler EventHandler)
+	Subscribe(eventType string, handler func(event interface{}) error) error
 }
 
-// LocalEventBus 本地事件总线实现
-type LocalEventBus struct {
-	handlers map[string][]EventHandler
-	mu       sync.RWMutex
+// SimpleEventBus 简单的内存事件总线实现
+type SimpleEventBus struct {
+	handlers map[string][]func(event interface{}) error
 }
 
-// NewLocalEventBus 创建本地事件总线
-func NewLocalEventBus() *LocalEventBus {
-	return &LocalEventBus{
-		handlers: make(map[string][]EventHandler),
+// NewSimpleEventBus 创建一个简单的事件总线
+func NewSimpleEventBus() *SimpleEventBus {
+	return &SimpleEventBus{
+		handlers: make(map[string][]func(event interface{}) error),
 	}
 }
 
 // Publish 发布事件
-func (bus *LocalEventBus) Publish(ctx context.Context, event Event) error {
-	bus.mu.RLock()
-	defer bus.mu.RUnlock()
-
-	handlers, exists := bus.handlers[event.EventName()]
-	if !exists {
-		return nil
+func (b *SimpleEventBus) Publish(ctx context.Context, event interface{}) error {
+	// 获取事件类型
+	var eventType string
+	switch e := event.(type) {
+	case interface{ GetType() string }:
+		eventType = e.GetType()
+	default:
+		// 如果事件没有实现 GetType 方法，使用类型名作为事件类型
+		eventType = "unknown"
 	}
 
+	// 调用所有相关的处理器
+	handlers := b.handlers[eventType]
 	for _, handler := range handlers {
-		if err := handler(ctx, event); err != nil {
+		if err := handler(event); err != nil {
+			// 在实际应用中，可能需要更复杂的错误处理策略
 			return err
 		}
 	}
@@ -49,9 +47,10 @@ func (bus *LocalEventBus) Publish(ctx context.Context, event Event) error {
 }
 
 // Subscribe 订阅事件
-func (bus *LocalEventBus) Subscribe(eventName string, handler EventHandler) {
-	bus.mu.Lock()
-	defer bus.mu.Unlock()
-
-	bus.handlers[eventName] = append(bus.handlers[eventName], handler)
+func (b *SimpleEventBus) Subscribe(eventType string, handler func(event interface{}) error) error {
+	if b.handlers[eventType] == nil {
+		b.handlers[eventType] = make([]func(event interface{}) error, 0)
+	}
+	b.handlers[eventType] = append(b.handlers[eventType], handler)
+	return nil
 }

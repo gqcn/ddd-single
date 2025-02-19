@@ -2,172 +2,188 @@ package order
 
 import (
 	"context"
-	"time"
-
-	"main/internal/domain/order/entity"
-	"main/internal/domain/order/event"
-	"main/internal/domain/order/repository"
-	"main/internal/domain/order/service"
-	"main/internal/domain/order/valueobject"
-	"main/internal/infrastructure/eventbus"
 
 	"github.com/gogf/gf/v2/errors/gerror"
+
+	"main/internal/domain/order/entity"
+	orderservice "main/internal/domain/order/service"
+	"main/internal/domain/order/valueobject"
+	productservice "main/internal/domain/product/service"
+	sharedvo "main/internal/domain/shared/valueobject"
 )
 
-// ApplicationService handles application-level order operations
-type ApplicationService struct {
-	orderRepo    repository.OrderRepository
-	orderService *service.OrderService
-	eventBus     eventbus.EventBus // 假设我们有一个事件总线接口
+// OrderApplication 订单应用服务
+// 应用服务负责用例编排和协调不同的领域服务
+type OrderApplication struct {
+	orderService   *orderservice.OrderService     // 订单领域服务
+	productService *productservice.ProductService // 商品领域服务
 }
 
-// NewApplicationService creates a new ApplicationService instance
-func NewApplicationService(
-	orderRepo repository.OrderRepository,
-	orderService *service.OrderService,
-	eventBus eventbus.EventBus,
-) *ApplicationService {
-	return &ApplicationService{
-		orderRepo:    orderRepo,
-		orderService: orderService,
-		eventBus:     eventBus,
+// NewOrderApplication 创建订单应用服务实例
+func NewOrderApplication(
+	orderService *orderservice.OrderService,
+	productService *productservice.ProductService,
+) *OrderApplication {
+	return &OrderApplication{
+		orderService:   orderService,
+		productService: productService,
 	}
 }
 
-// CreateOrder creates a new order
-func (s *ApplicationService) CreateOrder(ctx context.Context, req *CreateOrderRequest) (*OrderDTO, error) {
-	// Convert request to entity
-	order := req.ToEntity()
-
-	// Validate order
-	if err := order.Validate(); err != nil {
-		return nil, gerror.Wrap(err, "invalid order")
-	}
-
-	// Create order using domain service
-	order, err := s.orderService.CreateOrder(ctx, order.UserId, order.Items)
-	if err != nil {
-		return nil, err
-	}
-
-	// Publish event
-	s.eventBus.Publish(ctx, event.NewOrderCreatedEvent(order.Id, order.UserId))
-
-	// Convert to DTO and return
-	return ToDTO(order), nil
+// CreateOrderCommand 创建订单命令
+type CreateOrderCommand struct {
+	UserId string
+	Items  []OrderItemCommand
+	Remark string
 }
 
-// GetOrder retrieves an order by Id
-func (s *ApplicationService) GetOrder(ctx context.Context, orderId string) (*OrderDTO, error) {
-	order, err := s.orderRepo.FindById(ctx, orderId)
-	if err != nil {
-		return nil, err
-	}
-	return ToDTO(order), nil
+// OrderItemCommand 订单项命令
+type OrderItemCommand struct {
+	ProductId string
+	Quantity  int
 }
 
-// GetUserOrders retrieves all orders for a user
-func (s *ApplicationService) GetUserOrders(ctx context.Context, userId string) ([]*OrderDTO, error) {
-	orders, err := s.orderRepo.FindByUserId(ctx, userId)
-	if err != nil {
-		return nil, err
+// CreateOrder 创建订单
+// 应用服务方法负责：
+// 1. 参数验证和转换
+// 2. 协调不同领域服务
+// 3. 事务处理
+func (s *OrderApplication) CreateOrder(ctx context.Context, cmd CreateOrderCommand) (*entity.Order, error) {
+	// 1. 验证商品信息并检查库存
+	orderItems := make([]*entity.OrderItem, 0, len(cmd.Items))
+	for _, item := range cmd.Items {
+		// 获取商品信息
+		product, err := s.productService.GetProduct(ctx, item.ProductId)
+		if err != nil {
+			return nil, gerror.Wrap(err, "failed to get product")
+		}
+
+		// 检查库存
+		if !s.productService.HasSufficientStock(ctx, item.ProductId, item.Quantity) {
+			return nil, gerror.Newf(
+				"insufficient stock for product %s",
+				item.ProductId,
+			)
+		}
+
+		// 创建订单项
+		orderItem := entity.NewOrderItem(
+			product.Id,
+			product.Name,
+			item.Quantity,
+			product.Price.Amount(),
+		)
+		orderItems = append(orderItems, orderItem)
 	}
-	return ToDTOs(orders), nil
+
+	// 2. 创建订单（使用订单领域服务）
+	order, err := s.orderService.CreateOrder(ctx, cmd.UserId, orderItems)
+	if err != nil {
+		return nil, gerror.Wrap(err, "failed to create order")
+	}
+
+	// 3. 预扣库存
+	for _, item := range cmd.Items {
+		if err = s.productService.ReserveStock(ctx, item.ProductId, item.Quantity); err != nil {
+			// 如果预扣库存失败，应该回滚订单创建
+			// 这里可以通过发布事件来处理，或者使用分布式事务
+			return nil, gerror.Wrap(err, "failed to reserve stock")
+		}
+	}
+
+	// 4. 更新订单备注
+	if cmd.Remark != "" {
+		order.UpdateRemark(cmd.Remark)
+		if err = s.orderService.UpdateOrder(ctx, order); err != nil {
+			return nil, gerror.Wrap(err, "failed to update order remark")
+		}
+	}
+
+	return order, nil
 }
 
-// UpdateOrderStatus updates the status of an order
-func (s *ApplicationService) UpdateOrderStatus(ctx context.Context, orderId string, req *UpdateOrderStatusRequest) error {
-	// Get order
-	order, err := s.orderRepo.FindById(ctx, orderId)
-	if err != nil {
-		return err
-	}
-
-	// Convert and validate new status
-	newStatus, err := ToOrderStatus(req.Status)
-	if err != nil {
-		return err
-	}
-
-	// Store old status for event
-	oldStatus := order.Status
-
-	// Update status
-	if err := order.UpdateStatus(newStatus); err != nil {
-		return err
-	}
-
-	// Update order
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		return err
-	}
-
-	// Publish event
-	s.eventBus.Publish(event.NewOrderStatusChangedEvent(order.Id, oldStatus, newStatus, req.Remark))
-
-	return nil
+// PayOrderCommand 支付订单命令
+type PayOrderCommand struct {
+	OrderId        string
+	Amount         float64
+	PaymentMethod  valueobject.PaymentMethod
+	PaymentChannel valueobject.PaymentChannel
+	TradeNo        string
 }
 
-// CancelOrder cancels an order
-func (s *ApplicationService) CancelOrder(ctx context.Context, orderId string, reason string) error {
-	order, err := s.orderRepo.FindById(ctx, orderId)
-	if err != nil {
-		return err
-	}
-
-	oldStatus := order.Status
-
-	if err := order.UpdateStatus(valueobject.OrderStatusCancelled); err != nil {
-		return err
-	}
-
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		return err
-	}
-
-	s.eventBus.Publish(event.NewOrderStatusChangedEvent(
-		order.Id,
-		oldStatus,
-		valueobject.OrderStatusCancelled,
-		reason,
-	))
-
-	return nil
-}
-
-// AddOrderItem adds an item to an existing order
-func (s *ApplicationService) AddOrderItem(ctx context.Context, orderId string, itemReq *OrderItemRequest) error {
-	order, err := s.orderRepo.FindById(ctx, orderId)
-	if err != nil {
-		return err
-	}
-
-	item := entity.NewOrderItem(
-		itemReq.ProductId,
-		itemReq.ProductName,
-		itemReq.Quantity,
-		itemReq.Price,
+// PayOrder 支付订单
+func (s *OrderApplication) PayOrder(ctx context.Context, cmd PayOrderCommand) error {
+	// 1. 创建支付信息值对象
+	paymentInfo := valueobject.NewPaymentInfo(
+		sharedvo.NewMoney(cmd.Amount, "CNY"),
+		cmd.PaymentMethod,
+		cmd.PaymentChannel,
+		cmd.TradeNo,
+		nil,
 	)
 
-	if err := order.AddItem(item); err != nil {
-		return err
+	// 2. 调用领域服务处理支付
+	if err := s.orderService.PayOrder(ctx, cmd.OrderId, paymentInfo); err != nil {
+		return gerror.Wrap(err, "failed to pay order")
 	}
-
-	if err := s.orderRepo.Update(ctx, order); err != nil {
-		return err
-	}
-
-	s.eventBus.Publish(&event.OrderItemAddedEvent{
-		OrderEvent: event.OrderEvent{
-			Id:        item.Id,
-			OrderId:   orderId,
-			Timestamp: time.Now(),
-		},
-		ProductId:   item.ProductId,
-		ProductName: item.ProductName,
-		Quantity:    item.Quantity,
-		Price:       item.Price.Amount(),
-	})
 
 	return nil
+}
+
+// CancelOrderCommand 取消订单命令
+type CancelOrderCommand struct {
+	OrderId string
+}
+
+// CancelOrder 取消订单
+func (s *OrderApplication) CancelOrder(ctx context.Context, cmd CancelOrderCommand) error {
+	// 1. 获取订单信息
+	order, err := s.orderService.GetOrder(ctx, cmd.OrderId)
+	if err != nil {
+		return gerror.Wrap(err, "failed to get order")
+	}
+
+	// 2. 调用领域服务取消订单
+	if err := s.orderService.CancelOrder(ctx, cmd.OrderId); err != nil {
+		return gerror.Wrap(err, "failed to cancel order")
+	}
+
+	// 3. 释放库存
+	for _, item := range order.Items {
+		if err := s.productService.ReleaseStock(ctx, item.ProductId, item.Quantity); err != nil {
+			// 如果释放库存失败，应该通过事件或其他方式来处理不一致
+			return gerror.Wrap(err, "failed to release stock")
+		}
+	}
+
+	return nil
+}
+
+// GetOrderQuery 获取订单查询
+type GetOrderQuery struct {
+	OrderId string
+}
+
+// GetOrder 获取订单
+func (s *OrderApplication) GetOrder(ctx context.Context, query GetOrderQuery) (*entity.Order, error) {
+	order, err := s.orderService.GetOrder(ctx, query.OrderId)
+	if err != nil {
+		return nil, gerror.Wrap(err, "failed to get order")
+	}
+	return order, nil
+}
+
+// ListOrdersByUserQuery 获取用户订单列表查询
+type ListOrdersByUserQuery struct {
+	UserId string
+	Status valueobject.OrderStatus
+}
+
+// ListOrdersByUser 获取用户订单列表
+func (s *OrderApplication) ListOrdersByUser(ctx context.Context, query ListOrdersByUserQuery) ([]*entity.Order, error) {
+	orders, err := s.orderService.ListOrdersByUser(ctx, query.UserId, query.Status)
+	if err != nil {
+		return nil, gerror.Wrap(err, "failed to list orders")
+	}
+	return orders, nil
 }
